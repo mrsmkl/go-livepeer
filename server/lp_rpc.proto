@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package server;
+
+service Orchestrator {
+  // Gets transcoder information for a job
+  rpc GetTranscoder(TranscoderRequest) returns (TranscoderReply);
+}
+
+message TranscoderRequest {
+  int64 jobId = 1;
+  bytes sig = 2;
+}
+
+message TranscoderReply {
+  string transcoder = 1;
+  string manifestUri = 2;
+  string authType = 3;
+  string credentials = 4;
+}
+
+message AuthToken {
+  int64 jobId = 1;
+  bytes sig = 2;
+}
+
+message SegData {
+  int64 seq  = 1;
+  bytes hash = 2;
+  bytes sig  = 3;
+}
