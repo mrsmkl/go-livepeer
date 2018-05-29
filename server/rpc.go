@@ -213,6 +213,11 @@ func StartTranscodeServer(bind string, publicURI *url.URL, node *core.LivepeerNo
 	}
 	lp.transcoder.HandleFunc("/segment", orch.ServeSegment)
 
+	cert, key, err := getCert(publicURI, node.WorkDir)
+	if err != nil {
+		return // XXX return error
+	}
+
 	glog.Info("Listening for RPC on ", bind)
 	http.ListenAndServeTLS(bind, cert, key, &lp)
 }
