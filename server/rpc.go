@@ -197,7 +197,11 @@ func StartTranscodeServer(bind string, node *core.LivepeerNode) {
 		transcoder:   http.NewServeMux(),
 	}
 	lp.transcoder.HandleFunc("/segment", orch.ServeSegment)
-	http.ListenAndServeTLS(bind, "cert.pem", "key.pem", &lp)
+	cert, key, err := getCert(addr.Hex()+".transcoder.eth", node.WorkDir)
+	if err != nil {
+		return // XXX return error
+	}
+	http.ListenAndServeTLS(bind, cert, key, &lp)
 }
 
 func StartBroadcastClient(orchestratorServer string, node *core.LivepeerNode) (*http.Client, error) {
