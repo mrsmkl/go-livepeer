@@ -72,6 +72,7 @@ type LivepeerNode struct {
 	Eth             eth.LivepeerEthClient
 	EthEventMonitor eth.EventMonitor
 	EthServices     map[string]eth.EventService
+	ClaimManagers   map[int64]eth.ClaimManager
 	Ipfs            ipfs.IpfsApi
 	WorkDir         string
 	NodeType        NodeType
@@ -85,7 +86,7 @@ func NewLivepeerNode(e eth.LivepeerEthClient, vn net.VideoNetwork, nodeId NodeID
 		return nil, ErrLivepeerNode
 	}
 
-	return &LivepeerNode{VideoCache: NewBasicVideoCache(vn), VideoNetwork: vn, Identity: nodeId, Eth: e, WorkDir: wd, Database: dbh, EthServices: make(map[string]eth.EventService)}, nil
+	return &LivepeerNode{VideoCache: NewBasicVideoCache(vn), VideoNetwork: vn, Identity: nodeId, Eth: e, WorkDir: wd, Database: dbh, EthServices: make(map[string]eth.EventService), ClaimManagers: make(map[int64]eth.ClaimManager)}, nil
 }
 
 //Start sets up the Livepeer protocol and connects the node to the network
@@ -471,6 +472,30 @@ func (n *LivepeerNode) StopEthServices() error {
 	}
 
 	return nil
+}
+
+func (n *LivepeerNode) GetClaimManager(jobId int64) (eth.ClaimManager, error) {
+	// concurrency concerns here? what if a claim manager is added mid-call?
+	// XXX we should clear entries after some period of inactivity
+	if cm, ok := n.ClaimManagers[jobId]; ok {
+		return cm, nil
+	}
+	// no claimmanager exists yet; check if we're assigned the job
+	if n.Eth == nil {
+		return nil, nil
+	}
+	job, err := n.Eth.GetJob(big.NewInt(jobId))
+	if err != nil || job == nil {
+		glog.Errorf("Error getting job %v: %v", jobId, err)
+		if job == nil {
+			err = fmt.Errorf("Attempted to request non-existing job")
+		}
+		return nil, err
+	}
+	glog.Infof("Creating new claim manager for job %v", jobId)
+	cm := eth.NewBasicClaimManager(job, n.Eth, n.Ipfs, n.Database)
+	n.ClaimManagers[jobId] = cm
+	return cm, nil
 }
 
 func randName() string {

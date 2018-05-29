@@ -124,7 +124,7 @@ func (c *StubClient) BroadcasterDeposit(broadcaster common.Address) (*big.Int, e
 	return big.NewInt(0), nil
 }
 func (e *StubClient) GetJob(jobID *big.Int) (*lpTypes.Job, error) {
-	return nil, nil
+	return e.JobsMap[jobID.String()], nil
 }
 func (c *StubClient) GetClaim(jobID *big.Int, claimID *big.Int) (*lpTypes.Claim, error) {
 	return c.Claims[int(claimID.Int64())], nil
