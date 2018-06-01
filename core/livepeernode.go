@@ -63,6 +63,13 @@ const (
 	Bootnode
 )
 
+type SegmentChan chan *SegChanData
+
+type SegChanData struct {
+	seg *SignedSegment
+	res chan error
+}
+
 //LivepeerNode handles videos going in and coming out of the Livepeer network.
 type LivepeerNode struct {
 	Identity        NodeID
@@ -74,6 +81,7 @@ type LivepeerNode struct {
 	EthEventMonitor eth.EventMonitor
 	EthServices     map[string]eth.EventService
 	ClaimManagers   map[int64]eth.ClaimManager
+	SegmentChans    map[int64]SegmentChan
 	Ipfs            ipfs.IpfsApi
 	WorkDir         string
 	NodeType        NodeType
@@ -89,7 +97,7 @@ func NewLivepeerNode(e eth.LivepeerEthClient, vn net.VideoNetwork, nodeId NodeID
 		return nil, ErrLivepeerNode
 	}
 
-	return &LivepeerNode{VideoCache: NewBasicVideoCache(vn), VideoNetwork: vn, Identity: nodeId, Eth: e, WorkDir: wd, Database: dbh, EthServices: make(map[string]eth.EventService), ClaimManagers: make(map[int64]eth.ClaimManager), mutex: &sync.Mutex{}}, nil
+	return &LivepeerNode{VideoCache: NewBasicVideoCache(vn), VideoNetwork: vn, Identity: nodeId, Eth: e, WorkDir: wd, Database: dbh, EthServices: make(map[string]eth.EventService), ClaimManagers: make(map[int64]eth.ClaimManager), SegmentChans: make(map[int64]SegmentChan), mutex: &sync.Mutex{}}, nil
 }
 
 //Start sets up the Livepeer protocol and connects the node to the network
@@ -159,6 +167,94 @@ func (n *LivepeerNode) CreateTranscodeJob(strmID StreamID, profiles []ffmpeg.Vid
 	glog.Infof("Created broadcast job. Id: %v Price: %v. Type: %v", newJob.JobId, price, ethcommon.ToHex(transOpts)[2:])
 
 	return job, nil
+}
+
+func (n *LivepeerNode) transcodeSegmentLoop(job *ethTypes.Job, segChan SegmentChan) error {
+	glog.V(common.DEBUG).Info("Starting transcode segment loop for ", job.StreamId)
+	cm, err := n.GetClaimManager(job)
+	if err != nil {
+		return err
+	}
+	resultStrmIDs := make([]StreamID, len(job.Profiles), len(job.Profiles))
+	broadcasters := make(map[StreamID]stream.Broadcaster)
+	sid := StreamID(job.StreamId)
+	for i, vp := range job.Profiles {
+		strmID, err := MakeStreamID(n.Identity, sid.GetVideoID(), vp.Name)
+		if err != nil {
+			glog.Error("Error making stream ID: ", err)
+			return err
+		}
+		resultStrmIDs[i] = strmID
+		broadcaster, err := n.VideoNetwork.GetBroadcaster(string(strmID))
+		if err != nil {
+			glog.Errorf("Error making new stream: %v", err)
+			return err
+		}
+		broadcasters[strmID] = broadcaster
+	}
+	tr := transcoder.NewFFMpegSegmentTranscoder(job.Profiles, n.WorkDir)
+	config := net.TranscodeConfig{
+		StrmID:              job.StreamId,
+		Profiles:            job.Profiles,
+		JobID:               job.JobId,
+		PerformOnchainClaim: true,
+	}
+	go func() {
+		for {
+			// XXX make context timeout configurable
+			ctx, _ := context.WithTimeout(context.Background(), 10*time.Minute)
+			select {
+			case <-ctx.Done():
+				// timeout; clean up goroutine here
+			case chanData := <-segChan:
+				n.transcodeAndBroadcastSeg(&chanData.seg.Seg, chanData.seg.Sig, cm, tr, resultStrmIDs, broadcasters, config)
+				chanData.res <- nil
+			}
+		}
+	}()
+	return nil
+}
+
+func (n *LivepeerNode) getSegmentChan(job *ethTypes.Job) (SegmentChan, error) {
+	// concurrency concerns here? what if a chan is added mid-call?
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	jobId := job.JobId.Int64()
+	if sc, ok := n.SegmentChans[jobId]; ok {
+		return sc, nil
+	}
+	sc := make(SegmentChan, 1)
+	glog.V(common.DEBUG).Info("Creating new segment chan for job ", jobId)
+	n.SegmentChans[jobId] = sc
+	if err := n.transcodeSegmentLoop(job, sc); err != nil {
+		return nil, err
+	}
+	return sc, nil
+}
+
+func (n *LivepeerNode) TranscodeSegment(job *ethTypes.Job, ss *SignedSegment) {
+	glog.V(common.DEBUG).Infof("Starting to transcode segment %v", ss.Seg.SeqNo)
+	ch, err := n.getSegmentChan(job)
+	if err != nil {
+		glog.Error("Could not find segment chan ", err)
+		return // XXX respond to caller
+	}
+	segChan := &SegChanData{seg: ss, res: make(chan error, 1)}
+	//go func() { ch <- segChan }() // send segment to transcode loop
+	select {
+	case ch <- segChan:
+		glog.V(common.DEBUG).Info("Submitted segment to transcode loop")
+	default:
+		// sending segChan should not block; if it does, the channel is busy
+		glog.Error("Transcoder was busy with a previous segment!")
+	}
+	select {
+	case err := <-segChan.res:
+		if err != nil {
+			// XXX respond to caller
+		}
+	}
+	// XXX respond to caller
 }
 
 //TranscodeAndBroadcast transcodes one stream into multiple streams (specified by TranscodeConfig), broadcasts the streams, and returns a list of streamIDs.
