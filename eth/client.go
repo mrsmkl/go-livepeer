@@ -104,6 +104,8 @@ type LivepeerEthClient interface {
 	VerificationCodeHash() (string, error)
 	Paused() (bool, error)
 
+	WatchForJob(string) (*contracts.JobsManagerNewJob, error)
+
 	// Helpers
 	ContractAddresses() map[string]ethcommon.Address
 	CheckTx(*types.Transaction) error
@@ -818,6 +820,32 @@ func (c *client) CheckTx(tx *types.Transaction) error {
 
 func (c *client) Sign(msg []byte) ([]byte, error) {
 	return c.accountManager.Sign(msg)
+}
+
+func (c *client) WatchForJob(streamId string) (*contracts.JobsManagerNewJob, error) {
+	ctx, _ := context.WithTimeout(context.Background(), c.txTimeout)
+	for {
+		sink := make(chan *contracts.JobsManagerNewJob)
+		sub, err := c.JobsManagerSession.Contract.JobsManagerFilterer.WatchNewJob(nil, sink, []ethcommon.Address{c.Account().Address})
+		if err != nil {
+			glog.Error("Unable to start job watcher ", err)
+			return nil, err
+		}
+		select {
+		case newJob := <-sink:
+			sub.Unsubscribe()
+			if newJob.StreamId == streamId {
+				return newJob, nil
+			} // mismatched streamid; maybe we had concurrent listeners so retry
+		case errChan := <-sub.Err():
+			sub.Unsubscribe()
+			glog.Errorf("Error subscribing to new job %v; retrying", errChan)
+		case <-ctx.Done():
+			glog.Errorf("Job watcher timeout exceeded; stopping")
+			return nil, fmt.Errorf("JobWatchTimeout")
+		}
+	}
+	return nil, nil
 }
 
 func (c *client) getNonce() (uint64, error) {
