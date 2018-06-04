@@ -20,6 +20,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/eth"
+	ethContracts "github.com/livepeer/go-livepeer/eth/contracts"
 	ethTypes "github.com/livepeer/go-livepeer/eth/types"
 	"github.com/livepeer/go-livepeer/ipfs"
 	"github.com/livepeer/go-livepeer/net"
@@ -134,6 +135,26 @@ func (n *LivepeerNode) CreateTranscodeJob(strmID StreamID, profiles []ffmpeg.Vid
 	if err != nil {
 		return ErrNotFound
 	}
+
+	sink := make(chan *ethContracts.JobsManagerNewJob)
+	err = n.Eth.WatchForJob(sink)
+	if err != nil {
+		glog.Error("Unable to monitor for job ", err)
+		return err
+	}
+	go (func() {
+		newJob := <-sink
+		if newJob.Broadcaster != n.Eth.Account().Address {
+			return
+		}
+		glog.V(common.DEBUG).Info("Got a new job: ", newJob.JobId)
+		_, err := n.Eth.AssignedTranscoder(newJob.JobId)
+		if err != nil {
+			glog.Error("Could not get assigned transcoder for job ", newJob.JobId, err)
+			return
+		}
+	})()
+
 	tx, err := n.Eth.Job(strmID.String(), ethcommon.ToHex(transOpts)[2:], price, big.NewInt(0).Add(blknum, big.NewInt(DefaultJobLength)))
 	if err != nil {
 		glog.Errorf("Error creating transcode job: %v", err)
