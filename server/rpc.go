@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -321,4 +322,31 @@ func StartBroadcastClient(orchestratorServer string, node *core.LivepeerNode) (*
 	return httpc, nil
 }
 
+func SubmitSegment(bcast Broadcaster, transcoder string, streamId string, seg *stream.HLSSegment, token string) {
+	hc := http.Client{}
+	segData := &SegData{
+		Seq:  int64(seg.SeqNo),
+		Hash: crypto.Keccak256(seg.Data),
+	}
+	segCreds, err := genSegCreds(bcast, streamId, segData)
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequest("POST", transcoder, bytes.NewBuffer(seg.Data))
+	if err != nil {
+		glog.Error("Could not generate trascode request to ", transcoder)
+		return
+	}
+
+	req.Header.Set("Authorization", AuthType_LPE)
+	req.Header.Set("Credentials", token)
+	req.Header.Set("Livepeer-Segment", segCreds)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		glog.Error("Unable to submit segment ", err)
+		return
+	}
+	glog.Info("resp: %v", resp)
 }
