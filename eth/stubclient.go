@@ -58,6 +58,11 @@ func (e *StubClient) Request() (*types.Transaction, error)            { return n
 func (e *StubClient) BalanceOf(addr common.Address) (*big.Int, error) { return big.NewInt(0), nil }
 func (e *StubClient) TotalSupply() (*big.Int, error)                  { return big.NewInt(0), nil }
 
+// Service Registry
+
+func (e *StubClient) SetServiceURI(serviceURI string) (*types.Transaction, error) { return nil, nil }
+func (e *StubClient) GetServiceURI(addr common.Address) (string, error)           { return "", nil }
+
 // Staking
 
 func (e *StubClient) Transcoder(blockRewardCut *big.Int, feeShare *big.Int, pricePerSegment *big.Int) (*types.Transaction, error) {
@@ -152,10 +157,10 @@ func (c *StubClient) VerificationCodeHash() (string, error)            { return 
 
 // Helpers
 
-func (c *StubClient) ContractAddresses() map[string]common.Address { return nil }
-func (c *StubClient) CheckTx(tx *types.Transaction) error          { return nil }
-func (e *StubClient) Sign(msg []byte) ([]byte, error)              { return nil, nil }
-func (c *StubClient) LatestBlockNum() (*big.Int, error)            { return big.NewInt(0), nil }
-func (c *StubClient) GetGasInfo() (uint64, *big.Int)               { return 0, nil }
-func (c *StubClient) SetGasInfo(uint64, *big.Int) error            { return nil }
+func (c *StubClient) ContractAddresses() map[string]common.Address             { return nil }
+func (c *StubClient) CheckTx(tx *types.Transaction) error                      { return nil }
+func (e *StubClient) Sign(msg []byte) ([]byte, error)                          { return nil, nil }
+func (c *StubClient) LatestBlockNum() (*big.Int, error)                        { return big.NewInt(0), nil }
+func (c *StubClient) GetGasInfo() (uint64, *big.Int)                           { return 0, nil }
+func (c *StubClient) SetGasInfo(uint64, *big.Int) error                        { return nil }
 func (c *StubClient) WatchForJob(sink chan *contracts.JobsManagerNewJob) error { return nil }
