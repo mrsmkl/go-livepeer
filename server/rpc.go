@@ -42,6 +42,7 @@ type Orchestrator interface {
 	Sign(string) ([]byte, error)
 	GetJob(int64) (*lpTypes.Job, error)
 	TranscodeSeg(*lpTypes.Job, *core.SignedSegment) error
+	StreamIDs(*lpTypes.Job) ([]core.StreamID, error)
 }
 
 // Orchestator interface methods
@@ -65,6 +66,21 @@ func (orch *orchestrator) Sign(msg string) ([]byte, error) {
 
 func (orch *orchestrator) Address() ethcommon.Address {
 	return orch.address
+}
+
+func (orch *orchestrator) StreamIDs(job *lpTypes.Job) ([]core.StreamID, error) {
+	streamIds := make([]core.StreamID, len(job.Profiles))
+	sid := core.StreamID(job.StreamId)
+	vid := sid.GetVideoID()
+	for i, p := range job.Profiles {
+		strmId, err := core.MakeStreamID(orch.node.Identity, vid, p.Name)
+		if err != nil {
+			glog.Error("Error making stream ID: ", err)
+			return []core.StreamID{}, err
+		}
+		streamIds[i] = strmId
+	}
+	return streamIds, nil
 }
 
 func (orch *orchestrator) TranscodeSeg(job *lpTypes.Job, ss *core.SignedSegment) error {
@@ -224,10 +240,20 @@ func GetTranscoder(context context.Context, orch Orchestrator, req *TranscoderRe
 	if err != nil {
 		return nil, err
 	}
+	sids, err := orch.StreamIDs(job)
+	if err != nil {
+		return nil, err
+	}
+	stringStreamIds := make(map[string]string)
+	for i, s := range sids {
+		stringStreamIds[s.String()] = job.Profiles[i].Name
+	}
+
 	tr := TranscoderInfo{
 		Transcoder:  orch.Transcoder(),
 		AuthType:    AuthType_LPE,
 		Credentials: creds,
+		StreamIds:   stringStreamIds,
 	}
 	return &tr, nil
 }
